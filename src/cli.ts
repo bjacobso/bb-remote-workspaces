@@ -1,8 +1,10 @@
 import type { PluginCliContext, PluginCliResult } from "@get-bb/plugin-sdk";
 import { Effect } from "effect";
+import { isAbsolute, resolve } from "node:path";
 import { errorMessage } from "./errors.js";
 import type { OrchestratorShape } from "./orchestrator.js";
 import type { BbExtensionRuntime } from "./runtime.js";
+import type { ProjectConfigInput } from "./types.js";
 
 function value(argv: ReadonlyArray<string>, flag: string): string | undefined {
   const index = argv.indexOf(flag); return index < 0 ? undefined : argv[index + 1];
@@ -11,6 +13,28 @@ function required(argv: ReadonlyArray<string>, flag: string): string {
   const found = value(argv, flag); if (!found) throw new Error(`${flag} is required.`); return found;
 }
 const json = (data: unknown): PluginCliResult => ({ exitCode: 0, stdout: `${JSON.stringify(data, null, 2)}\n` });
+
+function configPath(argv: ReadonlyArray<string>, ctx: PluginCliContext): string {
+  const path = required(argv, "--file");
+  return isAbsolute(path) ? path : resolve(ctx.cwd ?? process.cwd(), path);
+}
+
+function applyConfigOverrides(base: ProjectConfigInput, argv: ReadonlyArray<string>): ProjectConfigInput {
+  const serverUrl = value(argv, "--server-url");
+  return {
+    ...base,
+    ...(value(argv, "--template") ? { templateVm: value(argv, "--template")! } : {}),
+    ...(value(argv, "--repo-path") ? { repoPath: value(argv, "--repo-path")! } : {}),
+    ...(value(argv, "--remote") ? { remoteName: value(argv, "--remote")! } : {}),
+    ...(value(argv, "--base") ? { baseBranch: value(argv, "--base")! } : {}),
+    ...(serverUrl ? { serverMode: "direct" as const, directServerUrl: serverUrl } : {}),
+    ...(value(argv, "--cpu") ? { cpu: Number(value(argv, "--cpu")) } : {}),
+    ...(value(argv, "--memory") ? { memory: value(argv, "--memory")! } : {}),
+    ...(value(argv, "--disk") ? { disk: value(argv, "--disk")! } : {}),
+    ...(value(argv, "--pool") ? { pool: value(argv, "--pool")! } : {}),
+    ...(value(argv, "--grace") ? { cleanupGraceMinutes: Number(value(argv, "--grace")) } : {}),
+  };
+}
 
 export async function runCli(runtime: BbExtensionRuntime, argv: string[], ctx: PluginCliContext): Promise<PluginCliResult> {
   try {
@@ -22,16 +46,12 @@ export async function runCli(runtime: BbExtensionRuntime, argv: string[], ctx: P
         if (!projectId) throw new Error("--project is required outside a project context.");
         if (action === "show") return json(await invoke((o) => o.getProject(projectId)));
         if (action === "doctor") return json(await invoke((o) => o.doctor(projectId)));
-        if (action === "configure") return json(await invoke((o) => o.configureProject({
-          projectId, templateVm: required(args, "--template"), repoPath: required(args, "--repo-path"),
-          ...(value(args, "--remote") ? { remoteName: value(args, "--remote")! } : {}),
-          ...(value(args, "--base") ? { baseBranch: value(args, "--base")! } : {}),
-          ...(value(args, "--server-url") ? { serverMode: "direct" as const, directServerUrl: value(args, "--server-url")! } : {}),
-          ...(value(args, "--cpu") ? { cpu: Number(value(args, "--cpu")) } : {}),
-          ...(value(args, "--memory") ? { memory: value(args, "--memory")! } : {}),
-          ...(value(args, "--disk") ? { disk: value(args, "--disk")! } : {}),
-          ...(value(args, "--pool") ? { pool: value(args, "--pool")! } : {}),
-          ...(value(args, "--grace") ? { cleanupGraceMinutes: Number(value(args, "--grace")) } : {}),
+        if (action === "diff") return json(await invoke((o) => o.diffProjectConfigFile(projectId, configPath(args, ctx))));
+        if (action === "configure") return json(await invoke((o) => Effect.gen(function*() {
+          const base = value(args, "--file")
+            ? yield* o.loadProjectConfigFile(projectId, configPath(args, ctx))
+            : { projectId, templateVm: required(args, "--template"), repoPath: required(args, "--repo-path") };
+          return yield* o.configureProject(applyConfigOverrides(base, args));
         })));
         break;
       }

@@ -1,0 +1,18 @@
+{
+  "$schema": "../schema.json",
+  "version": 1,
+  "templateVm": "app-main",
+  "repoPath": "/workspace/app",
+  "remoteName": "origin",
+  "baseBranch": "main",
+  "server": {
+    "mode": "connect"
+  },
+  "resources": {
+    "cpu": 4,
+    "memory": "8GB"
+  },
+  "cleanup": {
+    "graceMinutes": 30
+  }
+}

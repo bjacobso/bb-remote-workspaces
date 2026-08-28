@@ -1,6 +1,7 @@
 import { Context, Effect, Layer } from "effect";
 import { randomUUID } from "node:crypto";
 import { BbPlatform } from "./bb-platform.js";
+import { consumerConfigToInput, diffProjectConfig, parseConsumerProjectConfig, type ProjectConfigDiff } from "./config-file.js";
 import { asBbExeError, bbExeError, type BbExeError } from "./errors.js";
 import { ExeClient } from "./exe-client.js";
 import { DOCTOR_REPOSITORY_SCRIPT, INSPECT_REPOSITORY_SCRIPT, PREPARE_REPOSITORY_SCRIPT, installBbCommand } from "./remote-scripts.js";
@@ -10,6 +11,8 @@ import { normalizeProjectConfig, RemoteInspection, RemotePrepareResult, type Cre
 export interface OrchestratorShape {
   readonly configureProject: (input: ProjectConfigInput) => Effect.Effect<ProjectConfig, BbExeError>;
   readonly getProject: (projectId: string) => Effect.Effect<ProjectConfig, BbExeError>;
+  readonly loadProjectConfigFile: (projectId: string, filePath: string) => Effect.Effect<ProjectConfigInput, BbExeError>;
+  readonly diffProjectConfigFile: (projectId: string, filePath: string) => Effect.Effect<ProjectConfigDiff, BbExeError>;
   readonly doctor: (projectId: string) => Effect.Effect<DoctorResult, BbExeError>;
   readonly create: (input: CreateWorkspaceInput) => Effect.Effect<WorkspaceRecord, BbExeError>;
   readonly get: (id: string) => Effect.Effect<WorkspaceRecord, BbExeError>;
@@ -36,13 +39,25 @@ export const OrchestratorLive = Layer.effect(Orchestrator, Effect.gen(function*(
   const bb = yield* BbPlatform;
 
   const configureProject = (input: ProjectConfigInput) => Effect.gen(function*() {
-    const previous = yield* store.getProject(input.projectId).pipe(Effect.matchEffect({
-      onFailure: () => Effect.succeed(undefined),
-      onSuccess: (config) => Effect.succeed(config),
-    }));
+    const previous = yield* store.getProject(input.projectId).pipe(
+      Effect.catchIf((error) => error.code === "project_not_configured", () => Effect.succeed(undefined)),
+    );
     const config = yield* normalizeProjectConfig(input, previous);
     yield* assertGitName(config.remoteName, "remoteName"); yield* assertGitName(config.baseBranch, "baseBranch");
     return yield* store.putProject(config);
+  });
+  const loadProjectConfigFile = (projectId: string, filePath: string) => Effect.gen(function*() {
+    const content = yield* bb.readTextFile(filePath);
+    return consumerConfigToInput(projectId, yield* parseConsumerProjectConfig(content, filePath));
+  });
+  const diffProjectConfigFile = (projectId: string, filePath: string) => Effect.gen(function*() {
+    const input = yield* loadProjectConfigFile(projectId, filePath);
+    const current = yield* store.getProject(projectId).pipe(
+      Effect.catchIf((error) => error.code === "project_not_configured", () => Effect.succeed(undefined)),
+    );
+    const desired = yield* normalizeProjectConfig(input, current, current?.updatedAt ?? Date.now());
+    yield* assertGitName(desired.remoteName, "remoteName"); yield* assertGitName(desired.baseBranch, "baseBranch");
+    return diffProjectConfig(projectId, filePath, current, desired);
   });
   const doctor = (projectId: string) => Effect.gen(function*() {
     const config = yield* store.getProject(projectId);
@@ -146,7 +161,7 @@ export const OrchestratorLive = Layer.effect(Orchestrator, Effect.gen(function*(
     })), { concurrency: 2 });
   }).pipe(Effect.asVoid);
   return {
-    configureProject, getProject: store.getProject, doctor, create, get: store.getWorkspace, list: store.listWorkspaces,
+    configureProject, getProject: store.getProject, loadProjectConfigFile, diffProjectConfigFile, doctor, create, get: store.getWorkspace, list: store.listWorkspaces,
     retain: (id, reason) => store.updateWorkspace(id, { state: "retained", desiredState: "retained", retentionReason: reason, cleanupAfter: null }),
     scheduleCleanupForThread, destroy, reconcile,
   } satisfies OrchestratorShape;

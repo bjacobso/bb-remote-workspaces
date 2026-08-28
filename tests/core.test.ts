@@ -1,6 +1,8 @@
 import { Effect } from "effect";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { makeExeClientLayer, ExeClient, normalizeVmList } from "../src/exe-client.js";
+import { consumerConfigToInput, diffProjectConfig, parseConsumerProjectConfig } from "../src/config-file.js";
 import { redactSecrets } from "../src/errors.js";
 import { formatCommand, quoteShellArgument } from "../src/shell.js";
 import { normalizeProjectConfig } from "../src/types.js";
@@ -24,6 +26,42 @@ describe("Effect domain decoding", () => {
     const config = await Effect.runPromise(normalizeProjectConfig({ projectId: "p", templateVm: "gold", repoPath: "/srv/repo" }, undefined, 10));
     expect(config).toMatchObject({ remoteName: "origin", baseBranch: "main", serverMode: "connect", cleanupGraceMinutes: 30, createdAt: 10 });
     await expect(Effect.runPromise(normalizeProjectConfig({ projectId: "p", templateVm: "gold", repoPath: "relative" }))).rejects.toMatchObject({ code: "invalid_project_config" });
+  });
+});
+
+describe("config as code", () => {
+  const content = JSON.stringify({
+    version: 1, templateVm: "app-main", repoPath: "/workspace/app",
+    server: { mode: "connect" }, resources: { cpu: 4, memory: "8GB" }, cleanup: { graceMinutes: 45 },
+  });
+
+  it("strictly decodes the versioned consumer shape and projects it into the domain input", async () => {
+    const consumer = await Effect.runPromise(parseConsumerProjectConfig(content, "/repo/bb-exe.config.json"));
+    expect(consumerConfigToInput("project-1", consumer)).toEqual({
+      projectId: "project-1", templateVm: "app-main", repoPath: "/workspace/app",
+      serverMode: "connect", directServerUrl: null, cpu: 4, memory: "8GB", cleanupGraceMinutes: 45,
+    });
+  });
+
+  it("rejects unknown keys so configuration typos cannot be silently ignored", async () => {
+    await expect(Effect.runPromise(parseConsumerProjectConfig(JSON.stringify({ version: 1, templateVm: "app", repoPath: "/app", resoruces: {} }), "config.json")))
+      .rejects.toMatchObject({ code: "invalid_config_file" });
+  });
+
+  it("reports only consumer-controlled changes", async () => {
+    const desired = await Effect.runPromise(normalizeProjectConfig({ projectId: "p", templateVm: "new", repoPath: "/app" }, undefined, 20));
+    const current = { ...desired, templateVm: "old", updatedAt: 10 };
+    expect(diffProjectConfig("p", "/config.json", current, desired)).toMatchObject({
+      configured: true, changed: true, changes: [{ path: "templateVm", current: "old", desired: "new" }],
+    });
+  });
+
+  it("keeps every shipped example compatible with the Effect schema", async () => {
+    for (const name of ["development", "large-test", "direct-server"]) {
+      const content = readFileSync(new URL(`../examples/${name}.bb-exe.config.json`, import.meta.url), "utf8");
+      const consumer = await Effect.runPromise(parseConsumerProjectConfig(content, name));
+      await expect(Effect.runPromise(normalizeProjectConfig(consumerConfigToInput("project", consumer)))).resolves.toMatchObject({ projectId: "project" });
+    }
   });
 });
 

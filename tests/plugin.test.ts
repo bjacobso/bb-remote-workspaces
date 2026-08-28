@@ -30,6 +30,31 @@ describe("bb extension runtime", () => {
     expect(JSON.parse(shown.stdout)).toMatchObject({ projectId: "project-1", templateVm: "gold", repoPath: "/srv/repo", serverMode: "connect" });
   });
 
+  it("loads, overrides, and diffs a strict config file through the bb file API", async () => {
+    const config = JSON.stringify({
+      version: 1, templateVm: "gold", repoPath: "/srv/repo", server: { mode: "connect" },
+      resources: { cpu: 4 }, cleanup: { graceMinutes: 30 },
+    });
+    const host = createFakePluginHost({
+      pluginId: "exe", agentSkillIds: ["exe-workspaces"],
+      sdk: { files: { read: async ({ path }) => ({ path, content: config, contentEncoding: "utf8" }) } },
+    });
+    plugin(host.bb); disposals.push(() => host.harness.lifecycle.dispose());
+
+    const before = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    expect(JSON.parse(before.stdout)).toMatchObject({ configured: false, changed: true, filePath: "/repo/bb-exe.config.json" });
+
+    const configured = await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-exe.config.json", "--cpu", "8"], { cwd: "/repo" });
+    expect(JSON.parse(configured.stdout)).toMatchObject({ templateVm: "gold", cpu: 8 });
+    const overridden = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    expect(JSON.parse(overridden.stdout)).toMatchObject({ changed: true, changes: [expect.objectContaining({ path: "cpu", current: 8, desired: 4 })] });
+
+    await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    const clean = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    expect(JSON.parse(clean.stdout)).toMatchObject({ configured: true, changed: false, changes: [] });
+    expect(host.harness.sdk.callsTo("files.read")[0]?.[0]).toMatchObject({ path: "/repo/bb-exe.config.json" });
+  });
+
   it("validates raw JSON-schema tool arguments with Effect Schema", async () => {
     const host = await load();
     const result = await host.harness.behavior.callAgentTool("exe_get_workspace", { workspaceId: 42 });

@@ -22,6 +22,7 @@ export interface BbPlatformShape {
   readonly inspectEnvironment: (environmentId: string) => Effect.Effect<{ readonly safe: boolean; readonly openThreadIds: ReadonlyArray<string>; readonly activeTerminalIds: ReadonlyArray<string> }, BbExeError>;
   readonly archiveEnvironment: (environmentId: string) => Effect.Effect<void, BbExeError>;
   readonly deleteHost: (hostId: string) => Effect.Effect<void, BbExeError>;
+  readonly readTextFile: (path: string) => Effect.Effect<string, BbExeError>;
   readonly logInfo: (message: string) => Effect.Effect<void>;
   readonly logError: (message: string) => Effect.Effect<void>;
 }
@@ -69,6 +70,11 @@ export function makeBbPlatformLayer(bb: BbPluginApi, settings: BbExeSettings): L
     })),
     archiveEnvironment: (environmentId) => promise("environment_archive_failed", () => bb.sdk.environments.archiveThreads({ environmentId })).pipe(Effect.asVoid),
     deleteHost: (hostId) => promise("host_delete_failed", () => bb.sdk.hosts.delete({ hostId })).pipe(Effect.asVoid),
+    readTextFile: (path) => promise("config_file_read_failed", (signal) => bb.sdk.files.read({ path, signal })).pipe(
+      Effect.flatMap((file) => file.contentEncoding === "utf8"
+        ? Effect.succeed(file.content)
+        : Effect.try({ try: () => Buffer.from(file.content, "base64").toString("utf8"), catch: (error) => asBbExeError(error, "config_file_decode_failed") })),
+    ),
     logInfo: (message) => Effect.sync(() => bb.log.info(message)),
     logError: (message) => Effect.sync(() => bb.log.error(message)),
   });

@@ -22,7 +22,33 @@ bb plugin reload exe
 
 The token is declared as a bb secret setting. Prefer entering it in bb’s plugin settings UI when avoiding shell history matters.
 
-Configure a bb project using its project ID:
+Configuration can be committed alongside the project as `bb-exe.config.json`:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/bjacobso/bb-exe/main/schema.json",
+  "version": 1,
+  "templateVm": "checkout-main",
+  "repoPath": "/home/exe/checkout",
+  "remoteName": "origin",
+  "baseBranch": "main",
+  "server": { "mode": "connect" },
+  "resources": { "cpu": 4, "memory": "8GB" },
+  "cleanup": { "graceMinutes": 30 }
+}
+```
+
+Apply it using the bb project ID, then check for drift and run doctor:
+
+```bash
+bb exe project diff --project <project-id> --file ./bb-exe.config.json
+bb exe project configure --project <project-id> --file ./bb-exe.config.json
+bb exe project doctor --project <project-id>
+```
+
+The file is read through bb’s primary-host file API. Relative paths resolve from the invoking CLI’s working directory. Unknown properties fail validation, CLI flags override file values deliberately, and secrets are never accepted in the file. See [`examples/`](./examples) for development, large-test, and direct-server configurations.
+
+The equivalent flag-only setup remains available:
 
 ```bash
 bb exe project configure \
@@ -36,7 +62,7 @@ bb exe project configure \
 bb exe project doctor --project <project-id>
 ```
 
-By default, the plugin asks bb Connect for the temporary machine credential and uses the returned `getbb.app` server URL. For a directly reachable server, add `--server-url https://bb.example.com` while configuring the project.
+By default, the plugin asks bb Connect for the temporary machine credential and uses the returned `getbb.app` server URL. For a directly reachable server, use `server.mode: "direct"` plus `server.url`, or add `--server-url https://bb.example.com` while configuring the project.
 
 ## Use
 
@@ -128,7 +154,18 @@ npx --yes --package bb-app@0.40.0 bb plugin build
 bb plugin install path:$PWD
 ```
 
-The test suite covers command escaping/redaction, Effect configuration and provider errors, exe.dev request construction, bb registration, raw agent-tool validation, agent selection, and SQLite persistence using bb’s official fake plugin host. A production smoke test with real bb and exe.dev credentials remains before a stable release.
+The test suite covers command escaping/redaction, strict config files and drift, Effect configuration and provider errors, exe.dev request construction, bb registration, raw agent-tool validation, agent selection, and SQLite persistence using bb’s official fake plugin host.
+
+After installing the plugin and configuring its secret token, an explicitly gated real-account smoke test runs configure → doctor → create → wait → archive → guarded destroy:
+
+```bash
+BB_EXE_SMOKE=1 \
+BB_EXE_SMOKE_PROJECT=<project-id> \
+BB_EXE_SMOKE_CONFIG=./bb-exe.config.json \
+npm run smoke:real
+```
+
+Set `BB_EXE_SMOKE_KEEP=1` to retain the successful VM. Any failed run is retained automatically for diagnosis. This workflow may create billable resources and is never part of CI. A production run with real bb and exe.dev credentials remains required before a stable release.
 
 The complete product contract, state model, security requirements, and remaining V1 work are in [SPEC.md](./SPEC.md).
 

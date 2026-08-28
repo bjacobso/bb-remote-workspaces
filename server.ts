@@ -23,7 +23,7 @@ export default function plugin(bb: BbPluginApi): void {
   bb.cli.register({
     name: "exe", summary: "Manage disposable exe.dev workspaces.",
     commands: [
-      { name: "project", summary: "Configure or diagnose a project.", usage: "bb exe project <configure|show|doctor>" },
+      { name: "project", summary: "Configure, diff, or diagnose a project.", usage: "bb exe project <configure|diff|show|doctor>" },
       { name: "create", summary: "Clone a VM and spawn a bb thread.", usage: "bb exe create --prompt <text>" },
       { name: "list", summary: "List managed workspaces.", usage: "bb exe list [--project <id>]" },
       { name: "show", summary: "Inspect a workspace.", usage: "bb exe show --id <id>" },

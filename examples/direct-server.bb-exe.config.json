@@ -1,0 +1,19 @@
+{
+  "$schema": "../schema.json",
+  "version": 1,
+  "templateVm": "backend-main",
+  "repoPath": "/srv/backend",
+  "remoteName": "upstream",
+  "baseBranch": "develop",
+  "server": {
+    "mode": "direct",
+    "url": "https://bb.example.com"
+  },
+  "resources": {
+    "cpu": 8,
+    "memory": "16GB"
+  },
+  "cleanup": {
+    "graceMinutes": 120
+  }
+}

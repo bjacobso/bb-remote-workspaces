@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-exe",
-  "version": "0.1.0",
+  "version": "0.2.0-alpha.1",
   "description": "Disposable bb workspaces backed by exe.dev VM clones.",
   "type": "module",
   "license": "MIT",
@@ -23,6 +23,7 @@
     "check": "npm run typecheck && npm test",
     "test": "vitest run",
     "test:watch": "vitest",
+    "smoke:real": "node scripts/smoke.mjs",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

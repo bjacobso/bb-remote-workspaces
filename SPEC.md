@@ -24,12 +24,13 @@ The repository now ships the headless lifecycle rather than only this design. Th
 | --- | --- |
 | Effect runtime, Layers, Schema, tagged errors, cancellation | Implemented |
 | Secret exe.dev setting and per-project SQLite configuration | Implemented |
+| Strict config-as-code, JSON Schema, drift command, examples | Implemented |
 | Core doctor checks, clone, ownership metadata, Git preparation | Implemented |
 | bb direct/Connect enrollment and root-thread spawn | Implemented |
 | CLI, six native tools, and agent skill | Implemented |
 | Archive grace period, unarchive reconciliation, guarded deletion | Implemented |
 | bb fake-host tests, unit tests, typecheck, bb `0.40.0` build | Implemented |
-| Production exe.dev/bb smoke test | Not yet run |
+| Credential-gated production smoke runner | Implemented; real run not yet performed |
 | Plugin page, composer action, realtime progress | Remaining V1 work |
 | Retry command, complete orphan GC, pushed-branch detection | Remaining V1 work |
 | Provider-CLI and pre-enrollment server-route doctor checks | Remaining V1 work |
@@ -216,6 +217,7 @@ The plugin owns `bb exe` with these subcommands:
 
 ```text
 project configure
+project diff
 project show
 project doctor
 create
@@ -349,35 +351,32 @@ No ownership marker contains a join code, machine code, API token, provider toke
 
 ## 10. Configuration
 
-Project configuration is stored in the plugin database because template names, VM paths, and server routing are machine/account-specific. It is manageable through UI and CLI and exportable as redacted JSON.
+Effective project configuration is stored in plugin SQLite. A project may commit a strict, secret-free `bb-exe.config.json`; `project configure --file` validates and imports it through bb's primary-host file API, while `project diff --file` reports drift without changing state. Relative paths resolve from the invoking CLI's working directory. CLI flags can deliberately override file values during import.
+
+The committed file references the repository's JSON Schema for editor validation. Effect Schema independently validates the same boundary at runtime with excess-property errors, so misspelled keys cannot silently fall back to defaults. The bb project ID remains a CLI/context value rather than repository configuration, allowing one file to be reused by forks or separate bb installations. The exe.dev token remains exclusively in bb's secret settings.
 
 Conceptual schema:
 
 ```json
 {
   "version": 1,
-  "projectId": "project-id",
+  "$schema": "https://raw.githubusercontent.com/bjacobso/bb-exe/main/schema.json",
   "templateVm": "checkout-main",
   "repoPath": "/home/exe/checkout",
-  "remote": "origin",
+  "remoteName": "origin",
   "baseBranch": "main",
   "resources": {
     "cpu": 4,
     "memory": "8GB",
     "disk": "40GB",
-    "pool": null
+    "pool": "performance"
   },
   "server": {
-    "mode": "connect",
-    "directUrl": null
+    "mode": "connect"
   },
   "cleanup": {
-    "onRootThreadArchive": "after-grace-if-safe",
-    "graceMinutes": 30,
-    "deleteUnpushed": false,
-    "maxRetainedHours": null
-  },
-  "maxConcurrentCreates": 4
+    "graceMinutes": 30
+  }
 }
 ```
 
@@ -386,9 +385,8 @@ Validation rules:
 - `repoPath` is absolute and normalized for Linux;
 - VM, remote, and branch names are passed as arguments, never interpolated as raw shell fragments;
 - resource values use exe.dev's accepted units and project policy bounds;
-- `directUrl` must be HTTPS unless it resolves to an explicitly approved private address;
+- direct server `url` must use HTTPS;
 - `graceMinutes` is at least 5;
-- `maxConcurrentCreates` is between 1 and 16;
 - a finite retention limit never implies deleting unverifiable or dirty work unless an explicit force policy is enabled.
 
 ## 11. Durable data model
@@ -724,6 +722,8 @@ Contract tests cover:
 Run a real bb server with a disposable fake host daemon and fake exe.dev control plane. Verify enrollment command generation, host association, thread spawn arguments, event-driven cleanup, and crash recovery.
 
 ### 20.4 Live smoke tests
+
+`npm run smoke:real` implements the explicitly gated happy-path subset: configure from file, doctor, create, wait for idle, archive, and guarded destroy. It requires `BB_EXE_SMOKE=1`, never accepts the exe.dev token through environment or config, and retains a failed workspace for diagnosis. The broader resilience matrix below remains manual/future automation.
 
 Against a dedicated exe.dev test account and template:
 
