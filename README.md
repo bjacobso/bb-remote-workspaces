@@ -2,161 +2,141 @@
 
 Disposable [bb](https://getbb.app/) workspaces backed by full [exe.dev](https://exe.dev/) VM clones.
 
-> **Status:** design proposal. There is no installable plugin yet. This repository currently contains the product and implementation design for a first release.
+`bb-exe` is an installable, headless bb plugin. It copies a warm project VM, moves its checkout to the latest configured base branch, enrolls the clone as a temporary bb execution machine, and starts an ordinary bb thread inside it. Agent commands, terminals, files, and dev servers then run through bb’s host daemon on the VM—not through a long-lived SSH session.
 
-bb normally isolates a thread with a Git worktree on an execution machine. `bb-exe` takes the same idea one level lower: every workspace gets its own Linux VM, cloned from a warm project template that is already configured like `main`.
-
-The result should feel like an ordinary bb thread. The agent, terminal, browser previews, dev servers, and filesystem all run inside the VM. Archive the workspace and the VM is cleaned up after a safety check and grace period.
+> Status: early alpha. The end-to-end control plane is implemented and tested with bb’s plugin harness. It has not yet been exercised against a production exe.dev account, so use a dedicated template and review the safety notes before relying on automatic cleanup.
 
 ## Why
 
-A worktree isolates source code. It does not isolate the operating system around it.
+A worktree isolates source code. A VM also isolates packages, daemons, ports, process trees, databases, global configuration, and resource allocation. Cloning a warm VM retains prepared toolchains and caches without sharing the operating-system state of other agent work.
 
-A VM-backed workspace can also isolate:
+## Install
 
-- system packages, daemons, ports, and process trees;
-- databases and other mutable local services;
-- destructive migrations and infrastructure tools;
-- CPU, memory, and disk allocation;
-- credentials and network policy attached to the template;
-- background processes that outlive an agent turn.
+This release targets bb `0.40.x` and Node `22.19` or newer.
 
-Cloning a warm VM keeps the convenience of a prepared development machine. Toolchains, package caches, services, and the repository are already present, while the plugin still fetches and checks out the exact current `main` commit before starting the agent.
-
-## The intended experience
-
-Configure a bb project once:
-
-```text
-Project             checkout
-exe.dev template    checkout-main
-Repository path     /home/exe/checkout
-Base branch         main
-Resources           4 CPU / 8 GB RAM
-Cleanup             after archive, if safe
+```bash
+bb plugin install git:github.com/bjacobso/bb-exe@main
+bb plugin config exe set exeToken '<token from exe.dev/settings>'
+bb plugin reload exe
 ```
 
-Then create a workspace from the bb sidebar or the proposed CLI:
+The token is declared as a bb secret setting. Prefer entering it in bb’s plugin settings UI when avoiding shell history matters.
+
+Configure a bb project using its project ID:
+
+```bash
+bb exe project configure \
+  --project <project-id> \
+  --template checkout-main \
+  --repo-path /home/exe/checkout \
+  --base main \
+  --cpu 4 \
+  --memory 8GB
+
+bb exe project doctor --project <project-id>
+```
+
+By default, the plugin asks bb Connect for the temporary machine credential and uses the returned `getbb.app` server URL. For a directly reachable server, add `--server-url https://bb.example.com` while configuring the project.
+
+## Use
 
 ```bash
 bb exe create \
-  --project checkout \
+  --project <project-id> \
   --prompt "Upgrade Postgres and fix anything that breaks"
+
+bb exe list --project <project-id>
+bb exe show --id <workspace-id>
+bb exe retain --id <workspace-id> --reason "keep for review"
+bb exe destroy --id <workspace-id> --yes
+bb exe gc
 ```
 
-`bb-exe` will:
+The plugin also registers six native agent tools:
 
-1. copy `checkout-main` to a uniquely named exe.dev VM;
-2. create a fresh bb machine identity for the clone;
-3. fetch and check out the latest `origin/main` on a new workspace branch;
-4. enroll the VM as a temporary bb execution machine;
-5. start a bb thread in `/home/exe/checkout` on that machine;
-6. associate the thread, bb environment, machine, and VM in plugin storage.
+- `exe_create_workspace`
+- `exe_get_workspace`
+- `exe_list_workspaces`
+- `exe_retain_workspace`
+- `exe_destroy_workspace`
+- `exe_doctor`
 
-From that point on, bb talks directly to the VM's enrolled host daemon. Agent commands do not bounce through a long-lived SSH session.
+The agent destroy tool is safe-only. It cannot force deletion. Human force deletion requires both `--yes` and `--force` on the CLI.
 
-## Planned commands
+## Lifecycle
 
-These commands describe the proposed interface; they are not implemented yet.
+Creation is a durable state machine:
 
-```bash
-# Configure or validate one project's template
-bb exe project configure --project <id> --template <vm> --repo-path <path>
-bb exe project doctor --project <id>
+1. record the requested workspace in plugin SQLite;
+2. copy the template with `--copy-tags=false`;
+3. tag and comment the clone with its workspace ownership;
+4. fetch the configured remote and create `bb-exe/<workspace-id>` at the current base SHA;
+5. write a non-secret ownership marker inside the clone;
+6. mint a unique bb host ID and enrollment credentials;
+7. install the bb host daemon and wait for it to connect;
+8. spawn the root thread on the VM’s unmanaged repository path;
+9. record the VM, host, environment, and thread as ready.
 
-# Create and inspect workspaces
-bb exe create --project <id> --prompt <text> [--cpu 4] [--memory 8GB]
-bb exe list [--project <id>] [--json]
-bb exe show <workspace-id> [--json]
-
-# Lifecycle
-bb exe retain <workspace-id>
-bb exe destroy <workspace-id> [--yes] [--force]
-bb exe gc [--dry-run] [--json]
-```
-
-The plugin will also expose equivalent agent tools and a short skill so an agent can create, inspect, and safely retire VM workspaces without scraping UI text.
-
-## How it fits together
+Archiving or deleting the root thread schedules cleanup after the project grace period. The reconciler cancels cleanup when the thread is unarchived. Before deletion it verifies the marker, repository state, open threads, and active terminals; then it archives the environment, revokes the temporary host, and removes the VM.
 
 ```mermaid
 flowchart LR
-  User[bb app / CLI] --> Plugin[bb-exe plugin]
-  Plugin -->|cp, ssh, rm| Exe[exe.dev API]
-  Exe --> VM[workspace VM clone]
-  Plugin -->|join code + thread spawn| Server[bb server]
-  VM -->|enrolled host daemon| Server
-  Server -->|thread runtime| VM
-  VM --> Agent[Codex / Claude / other agent]
+  UI[bb CLI / agent tool] --> RT[Custom Effect runtime]
+  RT --> ORCH[Workspace orchestrator]
+  ORCH --> DB[(Plugin SQLite)]
+  ORCH --> EXE[exe.dev API]
+  ORCH --> BB[bb SDK]
+  EXE --> VM[VM clone]
+  VM -->|host daemon| BB
 ```
 
-The integration uses public capabilities that exist in the current products:
+## Effect v4 architecture
 
-- exe.dev's SSH-shaped HTTPS API can copy, inspect, SSH into, tag, and remove VMs;
-- bb's SDK can mint a machine join code, inspect and remove machines, and spawn a thread on an unmanaged path on a selected host;
-- bb connect can mint the temporary machine credential needed when the bb server is reached through `getbb.app`;
-- bb plugins can add UI, CLI commands, agent tools, skills, background services, storage, and lifecycle event handlers.
+The implementation uses Effect `4.0.0-rc.112` end to end:
 
-The MVP will provide an explicit **New exe workspace** action. Making exe.dev the transparent default choice in bb's standard new-thread workspace picker would require a new, experimental workspace-provisioner extension in bb core; that is a follow-up, not an MVP dependency.
+- Effect Schema decodes CLI/tool input, provider output, and persisted records;
+- tagged `BbExeError` values carry structured, redacted failures;
+- `BbPlatform`, `ExeClient`, `WorkspaceStore`, and `Orchestrator` are Context services composed with Layers;
+- one scoped `ManagedRuntime` is created by the bb plugin factory and disposed through `bb.onDispose`;
+- cancellation from bb CLI/tool/service signals reaches Effect fibers and exe.dev `fetch` calls;
+- every CLI command, tool, event handler, and background reconciliation pass enters that same runtime.
 
-## Template VM contract
+The single Zod use is the adapter for `bb.sdk.plugins.callRpc`, whose current SDK contract explicitly requires a Zod output schema. All plugin-owned validation remains Effect Schema.
 
-The template is a dedicated exe.dev VM, not a normal personal machine. It should contain:
+## Template contract and safety
 
-- the repository at a stable absolute path;
-- the project's toolchain, dependencies, caches, and local services;
-- the agent provider CLIs the project uses;
-- a clean Git working tree on the configured base branch;
-- a remote that can fetch the configured base branch and push workspace branches.
+Use a dedicated Linux template VM containing a clean Git checkout at a stable absolute path, project tooling, caches, services, and provider CLIs. The remote must be able to fetch the base branch and push work when needed.
 
-The template must **not** contain a running or previously enrolled bb host daemon data directory. Copying a bb host identity would make every clone impersonate the same machine. Each clone is enrolled with a newly minted bb host ID after it is created.
+The template must not contain an enrolled bb host identity. Copying one would make clones impersonate the same machine, so doctor and provisioning reject known identity files.
 
-Provider login state may be copied with the VM if the user intentionally puts it on the template. Prefer exe.dev integrations for services such as GitHub and LLM access where possible, because those integrations can keep underlying credentials off the VM filesystem.
+Deletion is intentionally conservative and irreversible:
 
-## Safety model
+- ownership requires both exe.dev metadata and the exact in-VM workspace marker;
+- automatic and agent cleanup refuse dirty repositories or commits ahead of the base ref;
+- cleanup refuses open environment threads and running terminals;
+- missing or unverifiable state causes retention, not deletion;
+- the exe.dev token, join code, and machine code are redacted from errors and logs.
 
-VM deletion is irreversible, so cleanup is deliberately conservative:
+Current alpha limitation: “ahead of base” is treated conservatively as valuable work even if the workspace branch was pushed. Retain or human-force-delete such a workspace after verifying the remote branch.
 
-- archiving a root thread schedules cleanup after a grace period rather than deleting immediately;
-- unarchiving during the grace period cancels cleanup;
-- automatic cleanup refuses to delete a dirty repository or unpushed commits;
-- a disconnected VM is retained unless an explicit force policy applies;
-- explicit destruction reports the branch, dirty state, and unpushed commits before confirmation;
-- the exe.dev API token is a bb secret setting and is never written to project files or logs;
-- the plugin never copies a template's bb host identity.
+## Development
 
-The VM is the isolation boundary, but the plugin itself is trusted code inside the bb server. Users should review its source and grant the exe.dev token only the access they are comfortable automating.
+```bash
+npm install
+npm run check
+npx --yes --package bb-app@0.40.0 bb plugin build
+bb plugin install path:$PWD
+```
 
-## MVP scope
+The test suite covers command escaping/redaction, Effect configuration and provider errors, exe.dev request construction, bb registration, raw agent-tool validation, agent selection, and SQLite persistence using bb’s official fake plugin host. A production smoke test with real bb and exe.dev credentials remains before a stable release.
 
-The first release is intentionally narrow:
-
-- one exe.dev template per bb project;
-- Linux template VMs;
-- one repository checkout at a configured absolute path;
-- workspaces begin at the latest configured remote base branch;
-- one exe.dev VM and one bb machine per VM workspace;
-- bb connect or an explicitly reachable bb server URL;
-- explicit create, retain, inspect, and destroy flows;
-- crash-safe reconciliation and conservative garbage collection.
-
-Starting from arbitrary feature branches, pooling warm clones, suspending/resuming VMs, multi-repository workspaces, and replacing bb's built-in workspace picker are follow-up work.
-
-## Design details
-
-The full contract, state machine, storage model, failure handling, security requirements, testing plan, and acceptance criteria live in [SPEC.md](./SPEC.md).
+The complete product contract, state model, security requirements, and remaining V1 work are in [SPEC.md](./SPEC.md).
 
 ## References
 
-- [bb product site](https://getbb.app/)
-- [bb source](https://github.com/get-bb/bb)
-- [bb system overview](https://github.com/get-bb/bb/blob/main/docs/system-overview.md)
-- [bb multi-machine guide](https://github.com/get-bb/bb/blob/main/docs/multiple-devices.md)
-- [bb plugin SDK](https://github.com/get-bb/bb/tree/main/packages/plugin-sdk)
+- [bb source and plugin SDK](https://github.com/get-bb/bb)
 - [exe.dev documentation](https://exe.dev/docs/all)
 - [exe.dev API](https://exe.dev/docs/api)
-- [exe.dev `cp`](https://exe.dev/docs/cli-cp)
-- [exe.dev `rm`](https://exe.dev/docs/cli-rm)
-- [exe.dev GitHub integration](https://exe.dev/docs/integrations-github)
+- [Effect](https://effect.website/)
 
-Research and API assumptions were checked against the linked documentation on August 27, 2026.
+API assumptions were checked against the linked documentation on August 27, 2026.

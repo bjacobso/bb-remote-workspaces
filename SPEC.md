@@ -2,7 +2,7 @@
 
 | Field | Value |
 | --- | --- |
-| Status | Draft |
+| Status | Implemented alpha; remaining V1 items tracked below |
 | Date | August 27, 2026 |
 | Plugin ID | `exe` |
 | Initial bb target | `0.40.x` |
@@ -15,6 +15,26 @@
 The template VM represents a warm development environment for a project's default branch. The clone carries the operating-system state, toolchains, services, and caches. Before the agent starts, the plugin fetches the remote and creates a clean workspace branch at the exact current base-branch commit.
 
 The MVP does not replace bb's built-in managed-worktree provisioner. It adds an explicit plugin-owned creation flow and then hands execution back to ordinary bb primitives.
+
+### 1.1 Implementation status
+
+The repository now ships the headless lifecycle rather than only this design. The implementation is built around Effect `4.0.0-rc.112` and a custom scoped runtime plugged into the bb extension factory.
+
+| Area | Alpha status |
+| --- | --- |
+| Effect runtime, Layers, Schema, tagged errors, cancellation | Implemented |
+| Secret exe.dev setting and per-project SQLite configuration | Implemented |
+| Core doctor checks, clone, ownership metadata, Git preparation | Implemented |
+| bb direct/Connect enrollment and root-thread spawn | Implemented |
+| CLI, six native tools, and agent skill | Implemented |
+| Archive grace period, unarchive reconciliation, guarded deletion | Implemented |
+| bb fake-host tests, unit tests, typecheck, bb `0.40.0` build | Implemented |
+| Production exe.dev/bb smoke test | Not yet run |
+| Plugin page, composer action, realtime progress | Remaining V1 work |
+| Retry command, complete orphan GC, pushed-branch detection | Remaining V1 work |
+| Provider-CLI and pre-enrollment server-route doctor checks | Remaining V1 work |
+
+The current alpha deliberately treats every commit ahead of the base ref as valuable work. It does not yet distinguish a pushed workspace branch from an unpushed one.
 
 ## 2. Problem
 
@@ -213,12 +233,12 @@ Read commands support `--json`. Mutation commands return a stable JSON envelope 
 
 Tools:
 
-- `exe_workspace_create`
-- `exe_workspace_get`
-- `exe_workspace_list`
-- `exe_workspace_retain`
-- `exe_workspace_destroy`
-- `exe_project_doctor`
+- `exe_create_workspace`
+- `exe_get_workspace`
+- `exe_list_workspaces`
+- `exe_retain_workspace`
+- `exe_destroy_workspace`
+- `exe_doctor`
 
 `exe_workspace_destroy` performs only safe deletion. If force would be required it returns the blocking facts and tells the agent to ask the user to use the UI or CLI.
 
@@ -249,7 +269,7 @@ The exe.dev HTTPS API accepts the same command language as its SSH API at `POST 
 V1 uses:
 
 - `whoami` for authentication health;
-- `ls --json` for discovery and reconciliation;
+- `ls` for discovery and reconciliation (the HTTPS API returns JSON automatically);
 - `cp <template> <name> --copy-tags=false` plus resource options;
 - `tag` and `comment` for ownership metadata;
 - `ssh <vm> <command...>` for repository preparation and bb enrollment;
@@ -276,12 +296,12 @@ The exact API is out of scope here. It would need protocol versioning, cancellat
 
 ## 9. Architecture
 
-The plugin has four entries:
+The alpha has two entries:
 
-1. **Server entry** — owns settings, database migrations, RPC, CLI, tools, bb SDK calls, lifecycle events, realtime updates, and reconciliation.
-2. **App entry** — renders the plugin page, project setup, creation flow, progress, and confirmation dialogs.
-3. **Host entry** — optional. Runs control-plane network or SSH operations on an explicitly configured enrolled control host when local SSH-key authentication is selected. HTTPS-token mode can run in the server entry.
-4. **Skill** — teaches agents the supported CLI and tool workflow.
+1. **Server entry** — creates one custom Effect `ManagedRuntime`; owns settings, database migrations, CLI, tools, bb SDK calls, lifecycle events, and reconciliation.
+2. **Skill** — teaches agents the supported tool workflow and the safe-only deletion boundary.
+
+A future **app entry** will render project setup, creation progress, and workspace controls. A future optional **host entry** may run control-plane operations on an enrolled control machine for an SSH-key authentication mode. HTTPS-token mode remains in the server entry.
 
 The default authentication mode is the exe.dev HTTPS API token. A later SSH-key mode may delegate to a `bb.host` entry on a selected, enrolled control machine.
 
@@ -321,7 +341,7 @@ Each VM receives:
 - tag `bb-exe`;
 - tag `bb-exe-<short-workspace-id>`;
 - comment containing `bb-exe workspace=<full-id> project=<project-id>`;
-- a non-secret marker file at `$XDG_STATE_HOME/bb-exe/workspaces/<id>.json` (falling back to `~/.local/state`) containing workspace ID, project ID, VM name, host ID, base SHA, and creation time.
+- a non-secret marker file at `$XDG_STATE_HOME/bb-exe/workspaces/<id>.json` (falling back to `~/.local/state`) containing workspace ID, project ID, branch, base SHA, and creation time.
 
 The exact tag grammar must be validated against exe.dev during implementation. If a desired tag is invalid, the implementation uses a deterministic safe encoding and records it in plugin storage.
 

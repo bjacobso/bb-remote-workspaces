@@ -1,0 +1,46 @@
+{
+  "name": "bb-plugin-exe",
+  "version": "0.1.0",
+  "description": "Disposable bb workspaces backed by exe.dev VM clones.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.19.0",
+    "bb": ">=0.40 <0.41",
+    "bbPluginSdk": ">=0.4.21 <0.5"
+  },
+  "bb": {
+    "name": "exe.dev Workspaces",
+    "description": "Create isolated bb workspaces on disposable exe.dev VM clones.",
+    "branding": {
+      "icon": "Cloud"
+    },
+    "server": "./server.ts",
+    "skills": ["skills"]
+  },
+  "scripts": {
+    "build": "bb plugin build",
+    "check": "npm run typecheck && npm test",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "effect": "4.0.0-rc.112",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@get-bb/plugin-sdk": "0.4.21",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "better-sqlite3": "^12.0.0",
+    "cron-parser": "^5.5.0",
+    "hono": "^4.11.9",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.2.4"
+  }
+}
