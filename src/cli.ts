@@ -1,10 +1,10 @@
 import type { PluginCliContext, PluginCliResult } from "@get-bb/plugin-sdk";
-import { Effect } from "effect";
+import { Effect, Schema } from "effect";
 import { isAbsolute, resolve } from "node:path";
 import { errorMessage } from "./errors.js";
 import type { OrchestratorShape } from "./orchestrator.js";
 import type { BbExtensionRuntime } from "./runtime.js";
-import type { ProjectConfigInput } from "./types.js";
+import { WorkspaceProviderId, type ProjectConfigInput } from "./types.js";
 
 function value(argv: ReadonlyArray<string>, flag: string): string | undefined {
   const index = argv.indexOf(flag); return index < 0 ? undefined : argv[index + 1];
@@ -23,6 +23,7 @@ function applyConfigOverrides(base: ProjectConfigInput, argv: ReadonlyArray<stri
   const serverUrl = value(argv, "--server-url");
   return {
     ...base,
+    ...(value(argv, "--provider") === undefined ? {} : { provider: Schema.decodeUnknownSync(WorkspaceProviderId)(value(argv, "--provider")) }),
     ...(value(argv, "--template") ? { templateVm: value(argv, "--template")! } : {}),
     ...(value(argv, "--repo-path") ? { repoPath: value(argv, "--repo-path")! } : {}),
     ...(value(argv, "--remote") ? { remoteName: value(argv, "--remote")! } : {}),
@@ -68,7 +69,7 @@ export async function runCli(runtime: BbExtensionRuntime, argv: string[], ctx: P
       }
       case "gc": await invoke((o) => o.reconcile); return json({ ok: true });
     }
-    return { exitCode: 2, stderr: "Usage: bb exe <project|create|list|show|retain|destroy|gc> [options]\n" };
+    return { exitCode: 2, stderr: "Usage: bb remote-workspaces <project|create|list|show|retain|destroy|gc> [options]\n" };
   } catch (error) {
     return { exitCode: 1, stderr: `${errorMessage(error)}\n` };
   }

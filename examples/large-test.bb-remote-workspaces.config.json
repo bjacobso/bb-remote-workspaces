@@ -1,7 +1,7 @@
 {
   "$schema": "../schema.json",
   "version": 1,
-  "templateVm": "app-main",
+  "templateVm": "app-ci",
   "repoPath": "/workspace/app",
   "remoteName": "origin",
   "baseBranch": "main",
@@ -9,10 +9,13 @@
     "mode": "connect"
   },
   "resources": {
-    "cpu": 4,
-    "memory": "8GB"
+    "cpu": 16,
+    "memory": "32GB",
+    "disk": "100GB",
+    "pool": "performance"
   },
   "cleanup": {
-    "graceMinutes": 30
-  }
+    "graceMinutes": 60
+  },
+  "provider": "exe"
 }

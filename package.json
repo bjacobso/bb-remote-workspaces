@@ -1,7 +1,7 @@
 {
-  "name": "bb-plugin-exe",
+  "name": "bb-remote-workspaces",
   "version": "0.2.0-alpha.1",
-  "description": "Disposable bb workspaces backed by exe.dev VM clones.",
+  "description": "Disposable bb workspaces backed by Exe and Amika.",
   "type": "module",
   "license": "MIT",
   "engines": {
@@ -10,13 +10,15 @@
     "bbPluginSdk": ">=0.4.21 <0.5"
   },
   "bb": {
-    "name": "exe.dev Workspaces",
-    "description": "Create isolated bb workspaces on disposable exe.dev VM clones.",
+    "name": "Remote Workspaces",
+    "description": "Disposable bb workspaces backed by Exe and Amika.",
     "branding": {
       "icon": "Cloud"
     },
     "server": "./server.ts",
-    "skills": ["skills"]
+    "skills": [
+      "skills"
+    ]
   },
   "scripts": {
     "build": "bb plugin build",

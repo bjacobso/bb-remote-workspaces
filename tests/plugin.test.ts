@@ -6,16 +6,16 @@ const disposals: Array<() => Promise<void>> = [];
 afterEach(async () => { while (disposals.length) await disposals.pop()?.(); vi.unstubAllGlobals(); });
 
 async function load() {
-  const host = createFakePluginHost({ pluginId: "exe", agentSkillIds: ["exe-workspaces"] });
+  const host = createFakePluginHost({ pluginId: "bb-remote-workspaces", agentSkillIds: ["remote-workspaces"] });
   plugin(host.bb); disposals.push(() => host.harness.lifecycle.dispose()); return host;
 }
 
 describe("bb extension runtime", () => {
   it("registers the complete headless surface", async () => {
     const host = await load();
-    expect(host.harness.inspection.registrations.cli?.name).toBe("exe");
+    expect(host.harness.inspection.registrations.cli?.name).toBe("remote-workspaces");
     expect(host.harness.inspection.registrations.agentTools.map((tool) => tool.name)).toEqual([
-      "exe_create_workspace", "exe_get_workspace", "exe_list_workspaces", "exe_retain_workspace", "exe_destroy_workspace", "exe_doctor",
+      "remote_workspaces_create_workspace", "remote_workspaces_get_workspace", "remote_workspaces_list_workspaces", "remote_workspaces_retain_workspace", "remote_workspaces_destroy_workspace", "remote_workspaces_doctor",
     ]);
     expect(host.harness.inspection.registrations.services.map((service) => service.name)).toEqual(["workspace-reconciler"]);
     expect(host.harness.inspection.registrations.threadEventHandlers["thread.archived"]).toBe(1);
@@ -36,28 +36,28 @@ describe("bb extension runtime", () => {
       resources: { cpu: 4 }, cleanup: { graceMinutes: 30 },
     });
     const host = createFakePluginHost({
-      pluginId: "exe", agentSkillIds: ["exe-workspaces"],
+      pluginId: "bb-remote-workspaces", agentSkillIds: ["remote-workspaces"],
       sdk: { files: { read: async ({ path }) => ({ path, content: config, contentEncoding: "utf8" }) } },
     });
     plugin(host.bb); disposals.push(() => host.harness.lifecycle.dispose());
 
-    const before = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
-    expect(JSON.parse(before.stdout)).toMatchObject({ configured: false, changed: true, filePath: "/repo/bb-exe.config.json" });
+    const before = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-remote-workspaces.config.json"], { cwd: "/repo" });
+    expect(JSON.parse(before.stdout)).toMatchObject({ configured: false, changed: true, filePath: "/repo/bb-remote-workspaces.config.json" });
 
-    const configured = await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-exe.config.json", "--cpu", "8"], { cwd: "/repo" });
+    const configured = await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-remote-workspaces.config.json", "--cpu", "8"], { cwd: "/repo" });
     expect(JSON.parse(configured.stdout)).toMatchObject({ templateVm: "gold", cpu: 8 });
-    const overridden = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    const overridden = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-remote-workspaces.config.json"], { cwd: "/repo" });
     expect(JSON.parse(overridden.stdout)).toMatchObject({ changed: true, changes: [expect.objectContaining({ path: "cpu", current: 8, desired: 4 })] });
 
-    await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
-    const clean = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-exe.config.json"], { cwd: "/repo" });
+    await host.harness.runCli(["project", "configure", "--project", "project-1", "--file", "bb-remote-workspaces.config.json"], { cwd: "/repo" });
+    const clean = await host.harness.runCli(["project", "diff", "--project", "project-1", "--file", "bb-remote-workspaces.config.json"], { cwd: "/repo" });
     expect(JSON.parse(clean.stdout)).toMatchObject({ configured: true, changed: false, changes: [] });
-    expect(host.harness.sdk.callsTo("files.read")[0]?.[0]).toMatchObject({ path: "/repo/bb-exe.config.json" });
+    expect(host.harness.sdk.callsTo("files.read")[0]?.[0]).toMatchObject({ path: "/repo/bb-remote-workspaces.config.json" });
   });
 
   it("validates raw JSON-schema tool arguments with Effect Schema", async () => {
     const host = await load();
-    const result = await host.harness.behavior.callAgentTool("exe_get_workspace", { workspaceId: 42 });
+    const result = await host.harness.behavior.callAgentTool("remote_workspaces_get_workspace", { workspaceId: 42 });
     expect(result).toMatchObject({ isError: true });
     expect(JSON.stringify(result)).toContain("parameters");
   });
@@ -72,7 +72,7 @@ describe("bb extension runtime", () => {
       origin: { kind: null, pluginId: null },
     };
     const selected = await host.harness.behavior.resolveAgentConfiguration(context);
-    expect(selected.skills).toEqual(["exe-workspaces"]); expect(selected.tools).toHaveLength(6);
+    expect(selected.skills).toEqual(["remote-workspaces"]); expect(selected.tools).toHaveLength(6);
   });
 
   it("runs create and guarded destroy end to end through the custom runtime", async () => {
@@ -82,18 +82,18 @@ describe("bb extension runtime", () => {
     const commands: string[] = [];
     vi.stubGlobal("fetch", async (_input: RequestInfo | URL, init?: RequestInit) => {
       const command = String(init?.body ?? ""); commands.push(command);
-      if (command === "ls") return new Response(JSON.stringify([{ name: workspaceVm, status: "running", tags: ["bb-exe"], comment: `bb-exe workspace=${workspaceId} project=project-1` }]));
+      if (command === "ls") return new Response(JSON.stringify([{ name: workspaceVm, status: "running", tags: ["bb-remote-workspaces"], comment: `bb-remote-workspaces workspace=${workspaceId} project=project-1` }]));
       if (command.includes("base64 -d")) {
         scriptCalls += 1;
         const output = scriptCalls === 1
-          ? { clean: true, baseSha: "abc123", branch: "bb-exe/test", copiedBbIdentityCount: 0 }
-          : { clean: true, ahead: 0, markerMatches: true, branch: "bb-exe/test", headSha: "abc123" };
+          ? { clean: true, baseSha: "abc123", branch: "bb-remote-workspaces/test", copiedBbIdentityCount: 0 }
+          : { clean: true, ahead: 0, markerMatches: true, branch: "bb-remote-workspaces/test", headSha: "abc123" };
         return new Response(JSON.stringify({ stdout: JSON.stringify(output) }));
       }
       return new Response("{}");
     });
     const host = createFakePluginHost({
-      pluginId: "exe", agentSkillIds: ["exe-workspaces"], settings: { exeToken: "exe0.token" },
+      pluginId: "bb-remote-workspaces", agentSkillIds: ["remote-workspaces"], settings: { exeToken: "exe0.token" },
       sdk: {
         hosts: {
           createJoinCode: async () => ({ hostId: "host-1", joinCode: "JOIN", expiresAt: Date.now() + 60_000 }),

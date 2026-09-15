@@ -1,30 +1,82 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/bjacobso/bb-exe/main/schema.json",
-  "title": "bb-exe project configuration",
-  "description": "Configuration for disposable bb workspaces backed by an exe.dev VM template.",
+  "$id": "https://raw.githubusercontent.com/bjacobso/bb-remote-workspaces/main/schema.json",
+  "title": "bb-remote-workspaces project configuration",
+  "description": "Configuration for disposable bb workspaces backed by Exe VM clones or Amika snapshots.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "templateVm", "repoPath"],
+  "required": [
+    "version",
+    "templateVm",
+    "repoPath"
+  ],
   "properties": {
-    "$schema": { "type": "string" },
-    "version": { "const": 1 },
-    "templateVm": { "type": "string", "minLength": 1, "maxLength": 128 },
-    "repoPath": { "type": "string", "pattern": "^/", "maxLength": 1024 },
-    "remoteName": { "type": "string", "default": "origin", "minLength": 1, "maxLength": 128 },
-    "baseBranch": { "type": "string", "default": "main", "minLength": 1, "maxLength": 255 },
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "const": 1
+    },
+    "templateVm": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Exe VM name or Amika snapshot name/id."
+    },
+    "repoPath": {
+      "type": "string",
+      "pattern": "^/",
+      "maxLength": 1024
+    },
+    "remoteName": {
+      "type": "string",
+      "default": "origin",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "baseBranch": {
+      "type": "string",
+      "default": "main",
+      "minLength": 1,
+      "maxLength": 255
+    },
     "server": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "properties": {
-        "mode": { "enum": ["connect", "direct"], "default": "connect" },
-        "url": { "type": "string", "format": "uri", "pattern": "^https://" }
+        "mode": {
+          "enum": [
+            "connect",
+            "direct"
+          ],
+          "default": "connect"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "mode": { "const": "direct" } }, "required": ["mode"] },
-          "then": { "required": ["url"] }
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "direct"
+              }
+            },
+            "required": [
+              "mode"
+            ]
+          },
+          "then": {
+            "required": [
+              "url"
+            ]
+          }
         }
       ]
     },
@@ -32,18 +84,67 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "cpu": { "type": "integer", "minimum": 1, "maximum": 128 },
-        "memory": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "disk": { "type": "string", "minLength": 1, "maxLength": 32 },
-        "pool": { "type": "string", "minLength": 1, "maxLength": 128 }
+        "cpu": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128
+        },
+        "memory": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "disk": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "pool": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
       }
     },
     "cleanup": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "graceMinutes": { "type": "integer", "minimum": 5, "maximum": 10080, "default": 30 }
+        "graceMinutes": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 10080,
+          "default": 30
+        }
+      }
+    },
+    "provider": {
+      "enum": [
+        "exe",
+        "amika"
+      ],
+      "default": "exe"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "const": "amika"
+          }
+        },
+        "required": [
+          "provider"
+        ]
+      },
+      "then": {
+        "properties": {
+          "resources": {
+            "maxProperties": 0
+          }
+        }
       }
     }
-  }
+  ]
 }

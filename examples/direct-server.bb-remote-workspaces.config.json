@@ -15,5 +15,6 @@
   },
   "cleanup": {
     "graceMinutes": 120
-  }
+  },
+  "provider": "exe"
 }

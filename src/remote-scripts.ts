@@ -25,7 +25,7 @@ git fetch --prune "$remote_name" "$base_branch"
 base_sha="$(git rev-parse "$remote_name/$base_branch")"
 git checkout -B "$workspace_branch" "$base_sha"
 
-state_root="\${XDG_STATE_HOME:-$HOME/.local/state}/bb-exe/workspaces"
+state_root="${"$"}{XDG_STATE_HOME:-$HOME/.local/state}/bb-remote-workspaces/workspaces"
 mkdir -p "$state_root"
 node -e 'const fs=require("fs"); fs.writeFileSync(process.argv[1], JSON.stringify({workspaceId:process.argv[2],projectId:process.argv[3],branch:process.argv[4],baseSha:process.argv[5],createdAt:Date.now()}), {mode:0o600})' \
   "$state_root/$workspace_id.json" "$workspace_id" "$project_id" "$workspace_branch" "$base_sha"
@@ -46,7 +46,10 @@ branch="$(git branch --show-current)"
 head_sha="$(git rev-parse HEAD)"
 git fetch --prune "$remote_name" "$base_branch" >/dev/null 2>&1 || true
 ahead="$(git rev-list --count "$remote_name/$base_branch..HEAD")"
-marker="\${XDG_STATE_HOME:-$HOME/.local/state}/bb-exe/workspaces/$workspace_id.json"
+marker="${"$"}{XDG_STATE_HOME:-$HOME/.local/state}/bb-remote-workspaces/workspaces/$workspace_id.json"
+if ! test -f "$marker"; then
+  marker="${"$"}{XDG_STATE_HOME:-$HOME/.local/state}/bb-exe/workspaces/$workspace_id.json"
+fi
 marker_matches=false
 if test -f "$marker" && node -e 'const x=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.exit(x.workspaceId===process.argv[2]?0:1)' "$marker" "$workspace_id"; then marker_matches=true; fi
 node -e 'console.log(JSON.stringify({clean:process.argv[1]==="true",ahead:Number(process.argv[2]),markerMatches:process.argv[3]==="true",branch:process.argv[4],headSha:process.argv[5]}))' \

@@ -1,4 +1,20 @@
-# bb-exe product and implementation specification
+# Remote workspace provider addendum
+
+This project is now **bb-remote-workspaces**. This addendum supersedes Exe-only assumptions in the original design below.
+
+- Project configuration chooses `provider: "exe" | "amika"`; omission defaults to Exe. The package name is `bb-remote-workspaces`, CLI namespace is `remote-workspaces`, and agent tools use `remote_workspaces_`.
+- `WorkspaceProviders` supplies provisioning, readiness, remote execution, inventory, ownership verification, and deletion. Orchestration and bb enrollment are shared.
+- Exe copies `templateVm` and uses tags/comments for provider ownership. Amika interprets `templateVm` as an active snapshot reference, creates through the Cloud API, persists the immutable sandbox ID, waits for readiness, and runs commands through the Amika SSH CLI on the plugin server.
+- Both providers require the in-workspace marker and conservative Git/environment checks before deletion. Amika deletion addresses the immutable ID. Credentials are separate secret settings (`exeToken`, `amikaToken`).
+- Each new workspace persists its provider and full non-secret project configuration for later cleanup. Legacy records default to Exe. Renaming the plugin does not migrate data or credentials between bb plugin IDs.
+- Amika doctor checks snapshot readiness; repository and copied-identity validation happen during creation. Exe-only resource overrides are rejected for Amika. Amika automatic stop/delete are disabled.
+- The adapters have automated tests; neither is certified by a real-account smoke run.
+
+## Original Exe design and roadmap
+
+The following sections retain the original Exe-specific contract and planned work. Exe transport details apply only to that provider; the addendum above and README describe the current multi-provider surface.
+
+# bb-remote-workspaces product and implementation specification
 
 | Field | Value |
 | --- | --- |
@@ -10,7 +26,7 @@
 
 ## 1. Summary
 
-`bb-exe` is a trusted bb plugin that provisions one disposable exe.dev VM for each plugin-created workspace, enrolls that VM as a temporary bb execution machine, and starts an ordinary bb thread against a repository inside the VM.
+`bb-remote-workspaces` is a trusted bb plugin that provisions one disposable exe.dev VM for each plugin-created workspace, enrolls that VM as a temporary bb execution machine, and starts an ordinary bb thread against a repository inside the VM.
 
 The template VM represents a warm development environment for a project's default branch. The clone carries the operating-system state, toolchains, services, and caches. Before the agent starts, the plugin fetches the remote and creates a clean workspace branch at the exact current base-branch commit.
 
@@ -187,9 +203,9 @@ The background reconciler identifies:
 - scheduled cleanups whose deadline has passed;
 - stale errors eligible for retry.
 
-Orphan discovery must prove plugin ownership through both the `bb-exe` tag and the plugin workspace ID stored in the exe.dev VM comment. Name prefix alone is insufficient authority to delete.
+Orphan discovery must prove plugin ownership through both the `bb-remote-workspaces` tag and the plugin workspace ID stored in the exe.dev VM comment. Name prefix alone is insufficient authority to delete.
 
-`bb exe gc --dry-run` is the default interactive diagnostic. Destructive garbage collection requires `--yes`, and dirty or unverifiable VMs are retained unless `--force` is also present.
+`bb remote-workspaces gc --dry-run` is the default interactive diagnostic. Destructive garbage collection requires `--yes`, and dirty or unverifiable VMs are retained unless `--force` is also present.
 
 ## 7. User surfaces
 
@@ -213,7 +229,7 @@ When the composer has a project context, the plugin may contribute **Run on exe.
 
 ### 7.3 CLI
 
-The plugin owns `bb exe` with these subcommands:
+The plugin owns `bb remote-workspaces` with these subcommands:
 
 ```text
 project configure
@@ -235,12 +251,12 @@ Read commands support `--json`. Mutation commands return a stable JSON envelope 
 
 Tools:
 
-- `exe_create_workspace`
-- `exe_get_workspace`
-- `exe_list_workspaces`
-- `exe_retain_workspace`
-- `exe_destroy_workspace`
-- `exe_doctor`
+- `remote_workspaces_create_workspace`
+- `remote_workspaces_get_workspace`
+- `remote_workspaces_list_workspaces`
+- `remote_workspaces_retain_workspace`
+- `remote_workspaces_destroy_workspace`
+- `remote_workspaces_doctor`
 
 `exe_workspace_destroy` performs only safe deletion. If force would be required it returns the blocking facts and tells the agent to ask the user to use the UI or CLI.
 
@@ -312,7 +328,7 @@ The default authentication mode is the exe.dev HTTPS API token. A later SSH-key 
 ```mermaid
 sequenceDiagram
   actor U as User
-  participant P as bb-exe plugin
+  participant P as bb-remote-workspaces plugin
   participant X as exe.dev API
   participant V as Cloned VM
   participant B as bb server
@@ -340,10 +356,10 @@ The exe.dev API is used only for lifecycle and bootstrap. Once enrolled, normal 
 
 Each VM receives:
 
-- tag `bb-exe`;
-- tag `bb-exe-<short-workspace-id>`;
-- comment containing `bb-exe workspace=<full-id> project=<project-id>`;
-- a non-secret marker file at `$XDG_STATE_HOME/bb-exe/workspaces/<id>.json` (falling back to `~/.local/state`) containing workspace ID, project ID, branch, base SHA, and creation time.
+- tag `bb-remote-workspaces`;
+- tag `bb-remote-workspaces-<short-workspace-id>`;
+- comment containing `bb-remote-workspaces workspace=<full-id> project=<project-id>`;
+- a non-secret marker file at `$XDG_STATE_HOME/bb-remote-workspaces/workspaces/<id>.json` (falling back to `~/.local/state`) containing workspace ID, project ID, branch, base SHA, and creation time.
 
 The exact tag grammar must be validated against exe.dev during implementation. If a desired tag is invalid, the implementation uses a deterministic safe encoding and records it in plugin storage.
 
@@ -351,7 +367,7 @@ No ownership marker contains a join code, machine code, API token, provider toke
 
 ## 10. Configuration
 
-Effective project configuration is stored in plugin SQLite. A project may commit a strict, secret-free `bb-exe.config.json`; `project configure --file` validates and imports it through bb's primary-host file API, while `project diff --file` reports drift without changing state. Relative paths resolve from the invoking CLI's working directory. CLI flags can deliberately override file values during import.
+Effective project configuration is stored in plugin SQLite. A project may commit a strict, secret-free `bb-remote-workspaces.config.json`; `project configure --file` validates and imports it through bb's primary-host file API, while `project diff --file` reports drift without changing state. Relative paths resolve from the invoking CLI's working directory. CLI flags can deliberately override file values during import.
 
 The committed file references the repository's JSON Schema for editor validation. Effect Schema independently validates the same boundary at runtime with excess-property errors, so misspelled keys cannot silently fall back to defaults. The bb project ID remains a CLI/context value rather than repository configuration, allowing one file to be reused by forks or separate bb installations. The exe.dev token remains exclusively in bb's secret settings.
 
@@ -360,7 +376,7 @@ Conceptual schema:
 ```json
 {
   "version": 1,
-  "$schema": "https://raw.githubusercontent.com/bjacobso/bb-exe/main/schema.json",
+  "$schema": "https://raw.githubusercontent.com/bjacobso/bb-remote-workspaces/main/schema.json",
   "templateVm": "checkout-main",
   "repoPath": "/home/exe/checkout",
   "remoteName": "origin",
@@ -685,7 +701,7 @@ Every operation emits structured progress with:
 - external resource IDs safe to show;
 - stable error code and redacted message.
 
-The plugin page shows a user-readable event history. `bb plugin logs exe` contains JSONL diagnostics. `bb exe show --json` exposes the current durable record and safe observed state.
+The plugin page shows a user-readable event history. `bb plugin logs exe` contains JSONL diagnostics. `bb remote-workspaces show --json` exposes the current durable record and safe observed state.
 
 The plugin registers `needs-configuration` when the token is absent or invalid. Individual project doctor failures do not disable healthy projects.
 
@@ -723,7 +739,7 @@ Run a real bb server with a disposable fake host daemon and fake exe.dev control
 
 ### 20.4 Live smoke tests
 
-`npm run smoke:real` implements the explicitly gated happy-path subset: configure from file, doctor, create, wait for idle, archive, and guarded destroy. It requires `BB_EXE_SMOKE=1`, never accepts the exe.dev token through environment or config, and retains a failed workspace for diagnosis. The broader resilience matrix below remains manual/future automation.
+`npm run smoke:real` implements the explicitly gated happy-path subset: configure from file, doctor, create, wait for idle, archive, and guarded destroy. It requires `BB_REMOTE_WORKSPACES_SMOKE=1`, never accepts the exe.dev token through environment or config, and retains a failed workspace for diagnosis. The broader resilience matrix below remains manual/future automation.
 
 Against a dedicated exe.dev test account and template:
 

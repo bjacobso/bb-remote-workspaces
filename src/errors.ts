@@ -21,16 +21,16 @@ export function errorMessage(error: unknown): string {
   return redactSecrets(error instanceof Error ? error.message : String(error));
 }
 
-export class BbExeError extends Schema.TaggedError<BbExeError>()("BbExeError", {
+export class BbRemoteWorkspacesError extends Schema.TaggedError<BbRemoteWorkspacesError>()("BbRemoteWorkspacesError", {
   code: Schema.String,
   message: Schema.String,
   retryable: Schema.Boolean,
 }) {}
 
-export function bbExeError(code: string, message: string, retryable = false): BbExeError {
-  return new BbExeError({ code, message: redactSecrets(message), retryable });
+export function bbRemoteWorkspacesError(code: string, message: string, retryable = false): BbRemoteWorkspacesError {
+  return new BbRemoteWorkspacesError({ code, message: redactSecrets(message), retryable });
 }
 
-export function asBbExeError(error: unknown, fallbackCode: string): BbExeError {
-  return error instanceof BbExeError ? error : bbExeError(fallbackCode, errorMessage(error));
+export function asBbRemoteWorkspacesError(error: unknown, fallbackCode: string): BbRemoteWorkspacesError {
+  return error instanceof BbRemoteWorkspacesError ? error : bbRemoteWorkspacesError(fallbackCode, errorMessage(error));
 }

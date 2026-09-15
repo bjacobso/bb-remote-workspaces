@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/bjacobso/bb-remote-workspaces/main/schema.json",
+  "version": 1,
+  "provider": "amika",
+  "templateVm": "checkout-base",
+  "repoPath": "/home/amika/workspace/checkout",
+  "baseBranch": "main",
+  "server": {
+    "mode": "connect"
+  },
+  "cleanup": {
+    "graceMinutes": 30
+  }
+}

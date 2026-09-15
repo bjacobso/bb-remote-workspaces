@@ -1,8 +1,8 @@
 import { Effect, Schema } from "effect";
-import { bbExeError, type BbExeError } from "./errors.js";
-import type { ProjectConfig, ProjectConfigInput } from "./types.js";
+import { bbRemoteWorkspacesError, type BbRemoteWorkspacesError } from "./errors.js";
+import { WorkspaceProviderId, type ProjectConfig, type ProjectConfigInput } from "./types.js";
 
-export const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/bjacobso/bb-exe/main/schema.json";
+export const CONFIG_SCHEMA_URL = "https://raw.githubusercontent.com/bjacobso/bb-remote-workspaces/main/schema.json";
 
 const ConsumerServerConfig = Schema.Struct({
   mode: Schema.Union([Schema.Literal("connect"), Schema.Literal("direct")]),
@@ -21,6 +21,7 @@ const ConsumerCleanupConfig = Schema.Struct({
 export const ConsumerProjectConfig = Schema.Struct({
   "$schema": Schema.optionalKey(Schema.String),
   version: Schema.Literal(1),
+  provider: Schema.optionalKey(WorkspaceProviderId),
   templateVm: Schema.String,
   repoPath: Schema.String,
   remoteName: Schema.optionalKey(Schema.String),
@@ -44,15 +45,15 @@ export interface ProjectConfigDiff {
   readonly changes: ReadonlyArray<ProjectConfigChange>;
 }
 
-export function parseConsumerProjectConfig(content: string, filePath: string): Effect.Effect<ConsumerProjectConfig, BbExeError> {
+export function parseConsumerProjectConfig(content: string, filePath: string): Effect.Effect<ConsumerProjectConfig, BbRemoteWorkspacesError> {
   return Effect.gen(function*() {
     const json = yield* Effect.try({
       try: () => JSON.parse(content) as unknown,
-      catch: (error) => bbExeError("invalid_config_json", `${filePath}: ${error instanceof Error ? error.message : String(error)}`),
+      catch: (error) => bbRemoteWorkspacesError("invalid_config_json", `${filePath}: ${error instanceof Error ? error.message : String(error)}`),
     });
     return yield* Effect.try({
       try: () => Schema.decodeUnknownSync(ConsumerProjectConfig, { onExcessProperty: "error" })(json),
-      catch: (error) => bbExeError("invalid_config_file", `${filePath}: ${error instanceof Error ? error.message : String(error)}`),
+      catch: (error) => bbRemoteWorkspacesError("invalid_config_file", `${filePath}: ${error instanceof Error ? error.message : String(error)}`),
     });
   });
 }
@@ -60,6 +61,7 @@ export function parseConsumerProjectConfig(content: string, filePath: string): E
 export function consumerConfigToInput(projectId: string, config: ConsumerProjectConfig): ProjectConfigInput {
   return {
     projectId,
+    ...(config.provider === undefined ? {} : { provider: config.provider }),
     templateVm: config.templateVm,
     repoPath: config.repoPath,
     ...(config.remoteName === undefined ? {} : { remoteName: config.remoteName }),
@@ -77,7 +79,7 @@ export function consumerConfigToInput(projectId: string, config: ConsumerProject
 }
 
 const comparableFields = [
-  "templateVm", "repoPath", "remoteName", "baseBranch", "serverMode", "directServerUrl",
+  "provider", "templateVm", "repoPath", "remoteName", "baseBranch", "serverMode", "directServerUrl",
   "cpu", "memory", "disk", "pool", "cleanupGraceMinutes",
 ] as const satisfies ReadonlyArray<keyof ProjectConfig>;
 

@@ -1,10 +1,14 @@
 import { Effect, Schema } from "effect";
-import { bbExeError, type BbExeError } from "./errors.js";
+import { bbRemoteWorkspacesError, type BbRemoteWorkspacesError } from "./errors.js";
+
+export const WorkspaceProviderId = Schema.Literals(["exe", "amika"]);
+export type WorkspaceProviderId = typeof WorkspaceProviderId.Type;
 
 export const ServerMode = Schema.Union([Schema.Literal("connect"), Schema.Literal("direct")]);
 export type ServerMode = typeof ServerMode.Type;
 
 export const ProjectConfigInput = Schema.Struct({
+  provider: Schema.optionalKey(WorkspaceProviderId),
   projectId: Schema.String, templateVm: Schema.String, repoPath: Schema.String,
   remoteName: Schema.optionalKey(Schema.String), baseBranch: Schema.optionalKey(Schema.String),
   serverMode: Schema.optionalKey(ServerMode), directServerUrl: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -15,6 +19,7 @@ export const ProjectConfigInput = Schema.Struct({
 export type ProjectConfigInput = typeof ProjectConfigInput.Type;
 
 export const ProjectConfig = Schema.Struct({
+  provider: WorkspaceProviderId,
   projectId: Schema.String, templateVm: Schema.String, repoPath: Schema.String,
   remoteName: Schema.String, baseBranch: Schema.String, serverMode: ServerMode,
   directServerUrl: Schema.NullOr(Schema.String), cpu: Schema.NullOr(Schema.Number),
@@ -34,6 +39,8 @@ export const DesiredWorkspaceState = Schema.Union([Schema.Literal("ready"), Sche
 export type DesiredWorkspaceState = typeof DesiredWorkspaceState.Type;
 
 export const WorkspaceRecord = Schema.Struct({
+  providerResourceId: Schema.optionalKey(Schema.String),
+  provider: WorkspaceProviderId, config: Schema.optionalKey(ProjectConfig),
   id: Schema.String, projectId: Schema.String, state: WorkspaceState, desiredState: DesiredWorkspaceState,
   vmName: Schema.String, hostId: Schema.NullOr(Schema.String), environmentId: Schema.NullOr(Schema.String),
   rootThreadId: Schema.NullOr(Schema.String), baseRef: Schema.String, baseSha: Schema.NullOr(Schema.String),
@@ -62,38 +69,42 @@ export type RemoteInspection = typeof RemoteInspection.Type;
 
 export interface DoctorResult {
   readonly ok: boolean; readonly projectId: string; readonly templateVm: string; readonly templateStatus: string;
-  readonly baseSha: string; readonly copiedBbIdentityCount: number;
+  readonly baseSha: string | null; readonly copiedBbIdentityCount: number | null;
   readonly checks: ReadonlyArray<{ readonly name: string; readonly ok: boolean; readonly message: string }>;
 }
 
-export function decodeUnknown<S extends Schema.Constraint & { readonly DecodingServices: never }>(schema: S, value: unknown, label: string): Effect.Effect<S["Type"], BbExeError> {
+export function decodeUnknown<S extends Schema.Constraint & { readonly DecodingServices: never }>(schema: S, value: unknown, label: string): Effect.Effect<S["Type"], BbRemoteWorkspacesError> {
   return Effect.try({
     try: () => Schema.decodeUnknownSync(schema)(value),
-    catch: (error) => bbExeError("invalid_input", `${label}: ${error instanceof Error ? error.message : String(error)}`),
+    catch: (error) => bbRemoteWorkspacesError("invalid_input", `${label}: ${error instanceof Error ? error.message : String(error)}`),
   });
 }
 
-export function normalizeProjectConfig(input: ProjectConfigInput, previous?: ProjectConfig, now = Date.now()): Effect.Effect<ProjectConfig, BbExeError> {
+export function normalizeProjectConfig(input: ProjectConfigInput, previous?: ProjectConfig, now = Date.now()): Effect.Effect<ProjectConfig, BbRemoteWorkspacesError> {
   return Effect.gen(function*() {
     if ([input.projectId, input.templateVm, input.repoPath].some((value) => value.trim() === ""))
-      return yield* bbExeError("invalid_project_config", "Project id, template VM, and repo path are required.");
-    if (!input.repoPath.startsWith("/")) return yield* bbExeError("invalid_project_config", "repoPath must be absolute.");
+      return yield* bbRemoteWorkspacesError("invalid_project_config", "Project id, template VM, and repo path are required.");
+    if (!input.repoPath.startsWith("/")) return yield* bbRemoteWorkspacesError("invalid_project_config", "repoPath must be absolute.");
+    const provider = input.provider ?? "exe";
+    if (provider !== "exe" && provider !== "amika") return yield* bbRemoteWorkspacesError("invalid_project_config", "provider must be exe or amika.");
+    if (provider === "amika" && [input.cpu, input.memory, input.disk, input.pool].some(v => v != null))
+      return yield* bbRemoteWorkspacesError("invalid_project_config", "Amika uses snapshot resources; cpu, memory, disk, and pool overrides are unsupported.");
     const mode = input.serverMode ?? "connect";
     const directServerUrl = input.directServerUrl ?? null;
-    if (mode === "direct" && directServerUrl === null) return yield* bbExeError("invalid_project_config", "directServerUrl is required in direct mode.");
+    if (mode === "direct" && directServerUrl === null) return yield* bbRemoteWorkspacesError("invalid_project_config", "directServerUrl is required in direct mode.");
     if (directServerUrl !== null) {
       let parsed: URL;
-      try { parsed = new URL(directServerUrl); } catch { return yield* bbExeError("invalid_project_config", "directServerUrl must be a valid HTTPS URL."); }
-      if (parsed.protocol !== "https:") return yield* bbExeError("invalid_project_config", "directServerUrl must use HTTPS.");
+      try { parsed = new URL(directServerUrl); } catch { return yield* bbRemoteWorkspacesError("invalid_project_config", "directServerUrl must be a valid HTTPS URL."); }
+      if (parsed.protocol !== "https:") return yield* bbRemoteWorkspacesError("invalid_project_config", "directServerUrl must use HTTPS.");
     }
     const cleanupGraceMinutes = input.cleanupGraceMinutes ?? 30;
     if (!Number.isInteger(cleanupGraceMinutes) || cleanupGraceMinutes < 5 || cleanupGraceMinutes > 10_080)
-      return yield* bbExeError("invalid_project_config", "cleanupGraceMinutes must be an integer from 5 to 10080.");
+      return yield* bbRemoteWorkspacesError("invalid_project_config", "cleanupGraceMinutes must be an integer from 5 to 10080.");
     const cpu = input.cpu ?? null;
     if (cpu !== null && (!Number.isInteger(cpu) || cpu < 1 || cpu > 128))
-      return yield* bbExeError("invalid_project_config", "cpu must be an integer from 1 to 128.");
+      return yield* bbRemoteWorkspacesError("invalid_project_config", "cpu must be an integer from 1 to 128.");
     return {
-      projectId: input.projectId.trim(), templateVm: input.templateVm.trim(), repoPath: input.repoPath.trim(),
+      provider, projectId: input.projectId.trim(), templateVm: input.templateVm.trim(), repoPath: input.repoPath.trim(),
       remoteName: input.remoteName?.trim() || "origin", baseBranch: input.baseBranch?.trim() || "main",
       serverMode: mode, directServerUrl, cpu, memory: input.memory?.trim() || null, disk: input.disk?.trim() || null,
       pool: input.pool?.trim() || null, cleanupGraceMinutes, createdAt: previous?.createdAt ?? now, updatedAt: now,

@@ -36,7 +36,7 @@ describe("config as code", () => {
   });
 
   it("strictly decodes the versioned consumer shape and projects it into the domain input", async () => {
-    const consumer = await Effect.runPromise(parseConsumerProjectConfig(content, "/repo/bb-exe.config.json"));
+    const consumer = await Effect.runPromise(parseConsumerProjectConfig(content, "/repo/bb-remote-workspaces.config.json"));
     expect(consumerConfigToInput("project-1", consumer)).toEqual({
       projectId: "project-1", templateVm: "app-main", repoPath: "/workspace/app",
       serverMode: "connect", directServerUrl: null, cpu: 4, memory: "8GB", cleanupGraceMinutes: 45,
@@ -57,8 +57,8 @@ describe("config as code", () => {
   });
 
   it("keeps every shipped example compatible with the Effect schema", async () => {
-    for (const name of ["development", "large-test", "direct-server"]) {
-      const content = readFileSync(new URL(`../examples/${name}.bb-exe.config.json`, import.meta.url), "utf8");
+    for (const name of ["development", "large-test", "direct-server", "amika"]) {
+      const content = readFileSync(new URL(`../examples/${name}.bb-remote-workspaces.config.json`, import.meta.url), "utf8");
       const consumer = await Effect.runPromise(parseConsumerProjectConfig(content, name));
       await expect(Effect.runPromise(normalizeProjectConfig(consumerConfigToInput("project", consumer)))).resolves.toMatchObject({ projectId: "project" });
     }
