@@ -20,12 +20,16 @@
       "skills"
     ]
   },
+  "exports": {
+    "./dsl": "./src/dsl.ts"
+  },
   "scripts": {
     "build": "bb plugin build",
     "check": "npm run typecheck && npm test",
     "test": "vitest run",
     "test:watch": "vitest",
     "smoke:real": "node scripts/smoke.mjs",
+    "synth:example": "tsx examples/dev-environments.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
@@ -43,6 +47,7 @@
     "hono": "^4.11.9",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
   }
