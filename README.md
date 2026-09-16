@@ -63,6 +63,61 @@ bb remote-workspaces project configure \
 bb remote-workspaces project doctor --project <project-id>
 ```
 
+## Dev environments as code
+
+For teams that need more than one environment shape, the TypeScript DSL composes provider-neutral environment primitives and synthesizes the same strict JSON consumed by the plugin. Compute is the only provider-specific primitive; repositories, bb connectivity, cleanup, and environments are shared:
+
+```ts
+import { Effect } from "effect";
+import {
+  cleanup, compute, defineSetup, environment, repository, synthesizeJson,
+} from "bb-remote-workspaces/dsl";
+
+const app = repository({ path: "/workspace/app", base: "main" });
+const standard = compute.exe({
+  template: "app-main",
+  resources: { cpu: 4, memory: "8GB" },
+});
+
+const setup = defineSetup({
+  default: "development",
+  environments: {
+    development: environment({ compute: standard, repository: app }),
+    largeTest: environment({
+      compute: compute.exe({ template: "app-main", resources: { cpu: 16, memory: "32GB" } }),
+      repository: app,
+      cleanup: cleanup({ graceMinutes: 60 }),
+    }),
+    review: environment({ compute: compute.amika({ template: "app-snapshot" }), repository: app }),
+  },
+});
+
+process.stdout.write(await Effect.runPromise(synthesizeJson(setup, {
+  environment: process.argv[2] ?? setup.default,
+})));
+```
+
+Synthesis is an Effect: missing targets, malformed URLs, invalid resource bounds, and provider-specific constraints fail in the typed error channel. It is deterministic and has no provisioning side effects. Generate and apply an artifact with the included TypeScript runner:
+
+```bash
+npm run --silent synth:example -- largeTest \
+  > bb-remote-workspaces.config.json
+bb remote-workspaces project diff --project <project-id> --file ./bb-remote-workspaces.config.json
+bb remote-workspaces project configure --project <project-id> --file ./bb-remote-workspaces.config.json
+```
+
+See [`examples/dev-environments.config.ts`](./examples/dev-environments.config.ts) for a complete multi-provider setup. The JSON artifact remains the review and apply boundary, so adopting the DSL does not change credential handling or workspace lifecycle safety.
+
+### DSL examples
+
+| Example | Demonstrates | Run |
+| --- | --- | --- |
+| [`minimal.dev-environments.config.ts`](./examples/minimal.dev-environments.config.ts) | Smallest single-environment Exe setup with defaults | `npx tsx examples/minimal.dev-environments.config.ts` |
+| [`dev-environments.config.ts`](./examples/dev-environments.config.ts) | Shared repository and compute primitives, named profiles, and Exe/Amika selection | `npm run --silent synth:example -- development` |
+| [`direct-server.dev-environments.config.ts`](./examples/direct-server.dev-environments.config.ts) | Direct bb connectivity, custom Git refs, resource sizing, pool, and cleanup policy | `npx tsx examples/direct-server.dev-environments.config.ts` |
+
+Select another profile from the multi-environment example by passing `development`, `largeTest`, or `review`. Every command writes JSON to stdout, so it can be inspected directly or redirected into `bb-remote-workspaces.config.json`.
+
 By default, the plugin asks bb Connect for the temporary machine credential and uses the returned `getbb.app` server URL. For a directly reachable server, use `server.mode: "direct"` plus `server.url`, or add `--server-url https://bb.example.com` while configuring the project.
 
 ## Providers
